@@ -5,7 +5,7 @@ provider:
   name: aws
   runtime: python3.11
   region: us-east-1
-  profile: default
+  profile: algocart
   environment:
     MONGO_URI_PARAM: /shipcore/mongo_uri
   iam:
@@ -21,7 +21,7 @@ functions:
   get_product:
     handler: get_product.lambda_handler
     layers:
-      - arn:aws:lambda:us-east-1:467866448248:layer:common:1
+      - arn:aws:lambda:us-east-1:467866448248:layer:common:2
     events:
       - httpApi:
           path: /products
@@ -30,7 +30,7 @@ functions:
   add_product:
     handler: add_product.lambda_handler
     layers:
-      - arn:aws:lambda:us-east-1:467866448248:layer:common:1
+      - arn:aws:lambda:us-east-1:467866448248:layer:common:2
     events:
       - httpApi:
           path: /products

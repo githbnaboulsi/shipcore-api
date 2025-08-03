@@ -1,6 +1,5 @@
-from mongo import get_mongo_client
-from util import create_response
-import json
+from scripts.mongo import get_mongo_client
+from scripts.util import create_response
 
 client = None
 

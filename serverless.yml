@@ -7,7 +7,7 @@ provider:
   region: us-east-1
   profile: algocart
   layers:
-    - arn:aws:lambda:us-east-1:467866448248:layer:common:3
+    - arn:aws:lambda:us-east-1:467866448248:layer:common:5
   iam:
     role:
       statements:
@@ -36,8 +36,12 @@ functions:
     handler: ebay_auth.lambda_handler
     events:
       - httpApi:
-          path: /ebay/connected
+          path: /ebay/auth
           method: POST
+
+  ebayStatus:
+    handler: ebay_status.lambda_handler
+    events:
       - httpApi:
           path: /ebay/status
           method: GET

@@ -5,96 +5,18 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
 
-import boto3
-from scripts.mongo import get_mongo_client
+from scripts.util import get_mongo_client
 from scripts.util import create_response
+from scripts.util import ssm
 
 # --- constants: production only ---
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"  # Prod endpoint
 client = None  # cache Mongo client
 
-
-def _ssm(name: str, decrypt: bool = True) -> str:
-    ssm = boto3.client("ssm", region_name="us-east-1")
-    return ssm.get_parameter(Name=name, WithDecryption=decrypt)["Parameter"]["Value"]
-
-
-def _get_method(event) -> str:
-    """Support API Gateway REST and HTTP APIs."""
-    if not event:
-        return "GET"
-    if "httpMethod" in event:  # REST API
-        return event["httpMethod"].upper()
-    # HTTP API v2
-    return (event.get("requestContext", {}).get("http", {}).get("method", "GET")).upper()
-
-
-def _iso_z(dt) -> str | None:
-    if not dt:
-        return None
-    if isinstance(dt, datetime):
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        else:
-            dt = dt.astimezone(timezone.utc)
-        return dt.isoformat().replace("+00:00", "Z")
-    # try to parse string
-    try:
-        s = dt
-        if isinstance(s, str) and s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(s)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        else:
-            parsed = parsed.astimezone(timezone.utc)
-        return parsed.isoformat().replace("+00:00", "Z")
-    except Exception:
-        return None
-
-def _to_utc_dt(value):
-    """Coerce Mongo/ISO string/naive datetime -> aware UTC datetime, or None."""
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-    if isinstance(value, str):
-        s = value
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        try:
-            dt = datetime.fromisoformat(s)
-            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
-        except Exception:
-            return None
-    return None
-
-def _handle_status(event):
-    try:
-        qsp = (event or {}).get("queryStringParameters") or {}
-        account = qsp.get("account") if isinstance(qsp, dict) and qsp.get("account") else "default"
-        doc = client.shipcore.ebay_tokens.find_one({"account": account})
-        if not doc:
-            return create_response(200, {"connected": False})
-
-        now = datetime.now(timezone.utc)
-        skew = timedelta(seconds=30)
-
-        refresh_expires_at = _to_utc_dt(doc.get("refresh_expires_at"))
-        # Only consider the refresh token
-        refresh_ok = bool(refresh_expires_at and refresh_expires_at > (now + skew))
-
-        payload = {
-            "connected": refresh_ok,                           # <-- only refresh token decides
-        }
-        return create_response(200, payload)
-
-    except Exception:
-        # Safe fallback so the UI never stalls on "loading"
-        return create_response(200, {"connected": False})
-
-
-def _handle_exchange(event):
+def lambda_handler(event, context):
+    global client
+    if client is None:
+        client = get_mongo_client()
     """
     POST /... (body: {"code": "<auth_code>"})
     Exchanges code for tokens, stores in Mongo, returns {ok: true} or a concise error.
@@ -169,23 +91,3 @@ def _handle_exchange(event):
 
     except Exception as e:
         return create_response(500, {"ok": False, "error": str(e)})
-
-
-def lambda_handler(event, context):
-    global client
-    if client is None:
-        client = get_mongo_client()
-
-    method = _get_method(event)
-
-    # CORS preflight (if your create_response adds CORS headers, this is enough)
-    if method == "OPTIONS":
-        return create_response(200, "OK")
-
-    # Route by HTTP method:
-    if method == "GET":
-        return _handle_status(event)
-    elif method == "POST":
-        return _handle_exchange(event)
-    else:
-        return create_response(405, {"message": f"Method {method} not allowed"})
